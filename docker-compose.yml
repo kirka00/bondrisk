@@ -1,0 +1,69 @@
+# Курсовой проект по БД — PostgreSQL 18 + TimescaleDB 2.31, FastAPI, загрузчик, Adminer.
+#
+#   docker compose up -d db adminer     база + Adminer (http://127.0.0.1:8080, сервер db, postgres/postgres, база bondrisk)
+#   docker compose up -d                + API (http://127.0.0.1:8000/docs)
+#   docker compose run --rm loader check
+#   docker compose down -v              снести вместе с данными (initdb выполнится заново)
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg18
+    container_name: bondrisk-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: bondrisk
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb", "-c", "timescaledb.telemetry_level=off"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - ./db:/db:ro
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "bondrisk"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  adminer:
+    image: adminer
+    container_name: bondrisk-adminer
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    container_name: bondrisk-api
+    env_file: .env
+    environment:
+      BONDRISK_DATABASE_URL: postgresql+psycopg://app_rw:${APP_RW_PASSWORD:-app_rw}@db:5432/bondrisk
+    command: ["uv", "run", "uvicorn", "bondrisk.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  loader:
+    build: .
+    profiles: ["tools"]
+    env_file: .env
+    environment:
+      BONDRISK_DATABASE_URL: postgresql+psycopg://app_rw:${APP_RW_PASSWORD:-app_rw}@db:5432/bondrisk
+      BONDRISK_ADMIN_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/bondrisk
+      BONDRISK_RAW_DIR: /app/data/raw
+    volumes:
+      - ./data:/app/data
+    entrypoint: ["uv", "run", "bondrisk"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
