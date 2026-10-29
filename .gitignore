@@ -2,8 +2,17 @@
 __pycache__/
 *.pyc
 .env
-data/raw/
+.env.*
+!.env.example
+!.env.prod.example
+data/
+*.dump
 .pytest_cache/
 .ruff_cache/
-notebooks/.ipynb_checkpoints/
 .DS_Store
+
+# прод
+deploy/caddy/users.caddy
+backups/
+logs/
+reports/
