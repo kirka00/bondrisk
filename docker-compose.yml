@@ -1,10 +1,3 @@
-# Курсовой проект по БД — PostgreSQL 18 + TimescaleDB 2.31, FastAPI, загрузчик, Adminer.
-#
-#   docker compose up -d db adminer     база + Adminer (http://127.0.0.1:8080, сервер db, postgres/postgres, база bondrisk)
-#   docker compose up -d                + API (http://127.0.0.1:8000/docs)
-#   docker compose run --rm loader check
-#   docker compose down -v              снести вместе с данными (initdb выполнится заново)
-
 services:
   db:
     image: timescale/timescaledb:latest-pg18
@@ -64,6 +57,30 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  scheduler:
+    build: .
+    container_name: bondrisk-scheduler
+    env_file: .env
+    environment:
+      BONDRISK_DATABASE_URL: postgresql+psycopg://app_rw:${APP_RW_PASSWORD:-app_rw}@db:5432/bondrisk
+      BONDRISK_RAW_DIR: /app/data/raw
+      BONDRISK_RAW_CACHE: "false"
+    volumes:
+      - ./data:/app/data
+    command: ["uv", "run", "--no-dev", "bondrisk", "scheduler"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    container_name: bondrisk-web
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - api
 
 volumes:
   pgdata:

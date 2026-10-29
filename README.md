@@ -1,29 +1,65 @@
-# bondrisk — система управления портфелями облигаций и аналитики процентных и кредитных рисков
+# bondrisk
 
-Курсовой проект по дисциплине «Базы данных» (МАИ, 2026). PostgreSQL 18 + TimescaleDB, Python 3.14, FastAPI.
-План и обоснование решений — `../План курсового проекта.md`.
+Система учёта портфелей облигаций и контроля процентного и кредитного риска.
+
+Справочник выпусков и эмитентов, котировки, курсы и кривая доходности хранятся в PostgreSQL + TimescaleDB.
+Сделки, позиции и касса ведутся в базе, там же считаются доходность, дюрация, DV01, VaR, стрессы и лимиты.
+Перед сделкой система показывает метрики и лимиты «до/после» и не пропускает сделку, нарушающую жёсткий лимит.
+Данные реальные: MOEX ISS, Банк России, рейтинговые агентства АКРА, НКР и НРА.
+
+## Стек
+
+- PostgreSQL 18 + TimescaleDB, PL/pgSQL, миграции Alembic
+- Python 3.14, FastAPI, SQLAlchemy Core, psycopg 3, uv
+- React + TypeScript + Vite, TanStack Query, Lightweight Charts
+- Docker Compose, Caddy (прод)
+- pytest, Playwright
 
 ## Запуск
 
 ```bash
-cp .env.example .env            # один раз
-docker compose up -d db adminer # PostgreSQL 18 + TimescaleDB 2.31, Adminer на http://127.0.0.1:8080
-uv sync                         # локальное окружение (Python 3.14 подтянет uv)
-uv run bondrisk check           # связь с БД и MOEX ISS
-uv run uvicorn bondrisk.api.main:app --reload   # http://127.0.0.1:8000/docs
+cp .env.example .env
+docker compose up -d --build     # база, API, веб, автообновление данных
+uv sync
+uv run bondrisk migrate          # схема, функции, триггеры
+make demo                        # загрузка данных и портфели индексов за 2 года (долго)
+```
+
+- интерфейс — http://127.0.0.1:3000
+- Swagger — http://127.0.0.1:8000/docs
+
+Данные догружаются автоматически каждый день в 21:00 и 07:30 по Москве (сервис `scheduler`).
+
+## Тесты
+
+```bash
+uv run pytest -q                 # нужна поднятая база
+uv run ruff check .
+cd frontend && npm run e2e       # Playwright
 ```
 
 ## Структура
 
 ```
-db/init/        SQL, выполняемый при создании пустой базы (расширения, схемы, роли)
-db/schema/      DDL по схемам: ref, ops, ts, risk, audit
-db/functions/   PL/pgSQL: НКД, потоки, YTM, дюрация, DV01, КБД
-db/triggers/    триггеры позиции/кассы, аудит, проверки
-db/seed/        демо-данные
-db/migrations/  Alembic + ручные SQL-миграции (в т. ч. таблица → hypertable)
-src/bondrisk/   api/ (FastAPI), loader/ (MOEX ISS, ЦБ, рейтинги), db/, settings.py
-tests/          sql/ api/ concurrency/ perf/
-data/raw/       кэш сырых ответов MOEX/ЦБ/агентств (не в git)
-notebooks/      графики для пояснительной записки
+db/          схема, функции, триггеры, представления, аналитические запросы, миграции
+src/         API (FastAPI) и загрузчики данных
+frontend/    веб-интерфейс
+tests/       тесты базы, API, конкурентного доступа и производительности
+deploy/      Caddy и бэкапы для прод-стека
 ```
+
+## Прод
+
+`docker-compose.prod.yml`: наружу только Caddy (HTTPS, вход по логину и паролю), база и API во внутренней
+сети, ежедневный бэкап базы.
+
+```bash
+cp .env.prod.example .env && chmod 600 .env      # домен, почта, пароли
+touch deploy/caddy/users.caddy
+echo "admin $(docker run --rm caddy:2.10 caddy hash-password --plaintext '<пароль>')" >> deploy/caddy/users.caddy
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml run --rm loader migrate
+```
+
+Логин в `users.caddy` должен совпадать с пользователем в `ops.app_user` (`admin`, `trader`, `risk`, `viewer`):
+по нему определяется роль.

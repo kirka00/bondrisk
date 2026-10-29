@@ -1,0 +1,57 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy same-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		-Server
+	}
+
+	route {
+		rate_limit {
+			zone per_ip {
+				key {remote_host}
+				events 600
+				window 1m
+			}
+		}
+
+		@logout path /logout
+		basic_auth @logout {
+			logout $2a$14$c.8Tb2MREH5uHDJu2yNeAuIioH9welwPVg75pnlf7KzI60AC0ekDi
+		}
+		respond @logout 204
+
+		@cross_site {
+			not method GET HEAD OPTIONS
+			header Origin *
+			not header Origin https://{http.request.hostport}
+		}
+		respond @cross_site "cross-site request blocked" 403
+
+		basic_auth {
+			import /etc/caddy/users.caddy
+		}
+
+		reverse_proxy web:80 {
+			header_up X-Auth-Login {http.auth.user.id}
+			header_up -X-User-Id
+		}
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+		format json
+	}
+}

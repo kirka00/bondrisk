@@ -1,0 +1,125 @@
+name: bondrisk
+
+x-app: &app
+  build: .
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+  depends_on:
+    db:
+      condition: service_healthy
+
+x-db-url: &db-url postgresql+psycopg://app_rw:${APP_RW_PASSWORD:?задайте APP_RW_PASSWORD в .env}@db:5432/bondrisk
+
+services:
+  db:
+    image: timescale/timescaledb:2.31.0-pg18
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 900m
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      POSTGRES_DB: bondrisk
+      APP_RW_PASSWORD: ${APP_RW_PASSWORD}
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb", "-c", "timescaledb.telemetry_level=off",
+              "-c", "shared_buffers=256MB", "-c", "effective_cache_size=768MB", "-c", "work_mem=8MB",
+              "-c", "maintenance_work_mem=128MB", "-c", "max_connections=40", "-c", "timescaledb.max_background_workers=4",
+              "-c", "jit=off"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - ./db:/db:ro
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "bondrisk"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    <<: *app
+    environment:
+      BONDRISK_DATABASE_URL: *db-url
+      BONDRISK_AUTH_LOGIN_HEADER: X-Auth-Login
+    mem_limit: 350m
+    command: ["uv", "run", "--no-dev", "uvicorn", "bondrisk.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${API_WORKERS:-1}"]
+
+  scheduler:
+    <<: *app
+    environment:
+      BONDRISK_DATABASE_URL: *db-url
+      BONDRISK_RAW_DIR: /app/data/raw
+      BONDRISK_RAW_CACHE: "false"
+    mem_limit: 300m
+    volumes:
+      - ./data:/app/data
+    command: ["uv", "run", "--no-dev", "bondrisk", "scheduler"]
+
+  loader:
+    <<: *app
+    profiles: ["tools"]
+    restart: "no"
+    environment:
+      BONDRISK_DATABASE_URL: *db-url
+      BONDRISK_ADMIN_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@db:5432/bondrisk
+      BONDRISK_RAW_DIR: /app/data/raw
+    mem_limit: 600m
+    volumes:
+      - ./data:/app/data
+    entrypoint: ["uv", "run", "--no-dev", "bondrisk"]
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 64m
+    depends_on:
+      - api
+
+  caddy:
+    build: ./deploy/caddy
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 128m
+    environment:
+      DOMAIN: ${DOMAIN:?задайте DOMAIN в .env}
+      ACME_EMAIL: ${ACME_EMAIL:?задайте ACME_EMAIL в .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy/users.caddy:/etc/caddy/users.caddy:ro
+      - ./logs/caddy:/var/log/caddy
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+  backup:
+    image: timescale/timescaledb:2.31.0-pg18
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 128m
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: bondrisk
+      KEEP_DAYS: "14"
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    volumes:
+      - ./deploy/backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
