@@ -1,0 +1,128 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+
+/* Тёмная тема: явный data-theme побеждает настройку ОС. Утилиты dark: применяются там же. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* static: графики читают токены s1…s8 через getComputedStyle — нужны все, а не только задействованные в классах */
+@theme static {
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 900px;
+  --breakpoint-lg: 1200px;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-white: #ffffff;
+  --color-surface: #fcfcfb;
+  --color-page: #f9f9f7;
+  --color-text: #0b0b0b;
+  --color-text-2: #52514e;
+  --color-muted: #898781;
+  --color-grid: #e1e0d9;
+  --color-axis: #c3c2b7;
+  --color-border: rgba(11, 11, 11, 0.1);
+  --color-border-strong: rgba(11, 11, 11, 0.18);
+  --color-wash: rgba(11, 11, 11, 0.04);
+  --color-wash-2: rgba(11, 11, 11, 0.07);
+  --color-s1: #2a78d6;
+  --color-s2: #eb6834;
+  --color-s3: #1baf7a;
+  --color-s4: #eda100;
+  --color-s5: #e87ba4;
+  --color-s6: #008300;
+  --color-s7: #6250d6;
+  --color-s8: #e34948;
+  --color-s1-track: #cde2fb;
+  --color-s1-soft: rgba(42, 120, 214, 0.1);
+  --color-neutral-mid: #f0efec;
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+  --color-good-text: #006300;
+  --color-bad-text: #b02a2a;
+  --color-warning-text: #7a5200;
+  --color-good-bg: rgba(12, 163, 12, 0.1);
+  --color-warning-bg: rgba(250, 178, 25, 0.16);
+  --color-serious-bg: rgba(236, 131, 90, 0.16);
+  --color-critical-bg: rgba(208, 59, 59, 0.12);
+  --color-accent: var(--color-s1);
+  --color-accent-ink: #ffffff;
+
+  --radius-card: 8px;
+  --radius-ctl: 6px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--color-border);
+
+  --animate-pop-in: pop-in 160ms var(--ease-out);
+  --animate-tip-in: pop-in 125ms var(--ease-out);
+  --animate-fade-in: fade-in 200ms var(--ease-out);
+  --animate-dialog-in: dialog-in 200ms var(--ease-out);
+  --animate-sheet-in: sheet-in 220ms var(--ease-out);
+  --animate-sheet-up: sheet-up 220ms var(--ease-out);
+  --animate-progress: progress-slide 1s var(--ease-out) infinite;
+
+  @keyframes pop-in { from { opacity: 0; transform: scale(0.96); } }
+  @keyframes fade-in { from { opacity: 0; } }
+  @keyframes dialog-in { from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); } }
+  @keyframes sheet-in { from { opacity: 0; transform: translateX(24px); } }
+  @keyframes sheet-up { from { opacity: 0; transform: translateY(24px); } }
+  @keyframes progress-slide { from { left: -30%; } to { left: 100%; } }
+}
+
+@layer base {
+  /* тёмные значения тех же токенов: data-theme=dark, либо ОС без явного data-theme=light */
+  :root[data-theme='dark'],
+  :root:where(:not([data-theme='light'])):where(.os-dark) { --_: 0; }
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --color-surface: #1a1a19; --color-page: #0d0d0d; --color-text: #f0efec; --color-text-2: #c3c2b7; --color-muted: #898781;
+    --color-grid: #2c2c2a; --color-axis: #383835; --color-border: rgba(255, 255, 255, 0.1); --color-border-strong: rgba(255, 255, 255, 0.2);
+    --color-wash: rgba(255, 255, 255, 0.05); --color-wash-2: rgba(255, 255, 255, 0.09);
+    --color-s1: #3987e5; --color-s2: #d95926; --color-s3: #199e70; --color-s4: #c98500; --color-s5: #d55181; --color-s6: #008300; --color-s7: #9085e9; --color-s8: #e66767;
+    --color-s1-track: #184f95; --color-s1-soft: rgba(57, 135, 229, 0.12); --color-neutral-mid: #383835;
+    --color-good-text: #0ca30c; --color-bad-text: #e66767; --color-warning-text: #fab219;
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--color-border);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme='light'])) {
+      color-scheme: dark;
+      --color-surface: #1a1a19; --color-page: #0d0d0d; --color-text: #f0efec; --color-text-2: #c3c2b7; --color-muted: #898781;
+      --color-grid: #2c2c2a; --color-axis: #383835; --color-border: rgba(255, 255, 255, 0.1); --color-border-strong: rgba(255, 255, 255, 0.2);
+      --color-wash: rgba(255, 255, 255, 0.05); --color-wash-2: rgba(255, 255, 255, 0.09);
+      --color-s1: #3987e5; --color-s2: #d95926; --color-s3: #199e70; --color-s4: #c98500; --color-s5: #d55181; --color-s6: #008300; --color-s7: #9085e9; --color-s8: #e66767;
+      --color-s1-track: #184f95; --color-s1-soft: rgba(57, 135, 229, 0.12); --color-neutral-mid: #383835;
+      --color-good-text: #0ca30c; --color-bad-text: #e66767; --color-warning-text: #fab219;
+      --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--color-border);
+    }
+  }
+  :root { color-scheme: light; }
+  html, body, #root { height: 100%; }
+  body { @apply m-0 font-sans text-[14px] leading-[1.45] text-text bg-page antialiased; }
+  a { @apply text-accent no-underline hover:underline; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  h1, h2, h3, h4 { @apply m-0 font-semibold tracking-[-0.01em]; }
+  h1 { @apply text-[22px] max-md:text-[20px]; }
+  h2 { @apply text-base; }
+  h3 { @apply text-sm; }
+  p { margin: 0; }
+}
+
+@layer components {
+  /* то, что утилитами не выразить: KaTeX, прокрутка сегментов/вкладок без полосы, тач-таблицы, safe-area */
+  .popover .katex-display { margin: 6px 0; overflow-x: auto; }
+  .popover .katex { font-size: 1.02em; }
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  @media (hover: none) { .group:hover td { background: inherit; } }
+  .info-btn { position: relative; }
+  @media (max-width: 899px) { .info-btn::after { content: ''; position: absolute; inset: -13px; } }
+  .progress-on::after { content: ''; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--color-accent); animation: var(--animate-progress); }
+  @media (prefers-reduced-motion: reduce) {
+    .progress-on::after { animation: none; left: 0; width: 100%; opacity: 0.5; }
+    .motion-pop, .motion-dialog, .motion-sheet { animation: fade-in 150ms ease !important; }
+  }
+}

@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     cbr_base_url: str = "https://www.cbr.ru/scripts"
     raw_dir: str = "data/raw"
     http_timeout: float = 30.0
+    # false — сырые ответы источников только пишутся в raw_dir, но не читаются оттуда:
+    # автообновление всегда берёт свежие данные (BONDRISK_RAW_CACHE=false в сервисе scheduler)
+    raw_cache: bool = True
+    # заголовок с логином от прокси (Caddy в docker-compose.prod.yml);
+    # если задан, X-User-Id игнорируется
+    auth_login_header: str | None = None
 
 
 @lru_cache
