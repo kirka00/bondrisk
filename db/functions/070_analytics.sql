@@ -59,7 +59,7 @@ language sql stable as $$
                 select m.bond_id from morning m where m.as_of = d.as_of
                 union select t.bond_id from ops.trade t
                        where t.portfolio_id = p_portfolio_id and t.trade_date > coalesce(d.prev, d.as_of - 1)
-                         and t.trade_date <= d.as_of and t.status <> 'cancelled')
+                         and t.trade_date <= d.as_of)
           left join risk.position_snapshot ps
             on ps.portfolio_id = p_portfolio_id and ps.as_of = d.as_of and ps.bond_id = b.bond_id and not ps.is_proforma),
     pr as (
@@ -77,7 +77,7 @@ language sql stable as $$
                    * (t.clean_price_pct / 100.0 * ref.face_value_at(t.bond_id, t.trade_date) + t.accrued_interest)
                    * risk.fx_on(c.currency, t.trade_date)) as flow
           from d
-          join ops.trade t on t.portfolio_id = p_portfolio_id and t.status <> 'cancelled'
+          join ops.trade t on t.portfolio_id = p_portfolio_id
                           and t.trade_date > coalesce(d.prev, d.as_of - 1) and t.trade_date <= d.as_of
           join close1 c on c.as_of = d.as_of and c.bond_id = t.bond_id
          group by d.as_of),
@@ -118,7 +118,7 @@ language sql stable as $$
                t.qty * (t.clean_price_pct / 100.0 * ref.face_value_at(t.bond_id, t.trade_date) + t.accrued_interest)
                  * risk.fx_on(b.currency, t.trade_date) as amount_rub
           from ops.trade t join ref.bond b on b.bond_id = t.bond_id
-         where t.portfolio_id = p_portfolio_id and t.status <> 'cancelled' and t.trade_date <= p_to),
+         where t.portfolio_id = p_portfolio_id and t.trade_date <= p_to),
     closed as (
         select bond_id from t group by bond_id
         having sum(case when side = 'buy' then qty else -qty end) = 0
@@ -186,7 +186,7 @@ language sql stable as $$
                     sum(t.qty * t.clean_price_pct) / sum(t.qty) as px,
                     sum(t.qty * risk.fx_on(b.currency, t.trade_date)) / sum(t.qty) as fx
                from ops.trade t join ref.bond b on b.bond_id = t.bond_id
-              where t.portfolio_id = p_portfolio_id and t.side = 'buy' and t.status <> 'cancelled' and t.trade_date <= p_as_of
+              where t.portfolio_id = p_portfolio_id and t.side = 'buy' and t.trade_date <= p_as_of
               group by t.bond_id)
     select v.bond_id, v.isin, v.short_name, v.currency, v.qty, b.px::double precision, v.clean_price_pct,
            b.fx::double precision, v.fx_rate,

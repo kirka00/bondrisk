@@ -25,7 +25,7 @@ def upgrade() -> None:
         run_sql(f"functions/{f.name}", check_bodies=True)  # схема уже на месте
     # в сводку добавлены дисконтная маржа и доля флоутеров: матвью пересоздаётся
     op.execute("drop materialized view if exists risk.mv_portfolio_risk")
-    run_sql("views/010_views.sql")
+    run_sql("views/010_views.sql", optional=True)  # на чистой базе представления пересоздаёт 0014
 
 
 def downgrade() -> None:

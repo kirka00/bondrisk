@@ -97,6 +97,8 @@ export interface Limit {
   is_hard: boolean; valid_from: string; valid_to: string | null
   basis: LimitBasis; pct_base: 'gross' | 'total_limit'; emission_share_pct: number | null; scope_name: string | null
   committee: 'IC' | 'RC' | null; self_adjust_pct: number | null; min_grade: string | null
+  /** редакции (SCD2): первая редакция цепочки, номер редакции, последняя ли она */
+  origin_id: number; version_no: number; is_current: boolean
 }
 export interface LimitInput {
   portfolio_id: number; metric: LimitMetric; scope_issuer_id?: number | null; scope_bond_id?: number | null
@@ -104,6 +106,8 @@ export interface LimitInput {
   warning_pct?: number; is_hard?: boolean; valid_from?: string; valid_to?: string | null
   basis?: LimitBasis; pct_base?: 'gross' | 'total_limit'; emission_share_pct?: number | null; scope_name?: string | null
   committee?: 'IC' | 'RC' | null; self_adjust_pct?: number | null; min_grade?: string | null
+  /** PATCH: дата вступления новой редакции */
+  effective_from?: string
 }
 export interface Breach {
   breach_id: number; limit_id: number; portfolio_id: number; portfolio_code: string; metric: LimitMetric

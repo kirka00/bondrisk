@@ -36,7 +36,6 @@ language sql stable as $$
           from ops.trade t
          where t.portfolio_id = p_portfolio_id
            and t.trade_date <= coalesce(p_holdings_date, p_as_of)   -- про-форма: состав на фиксированную дату
-           and t.status <> 'cancelled'
         union all
         select p_extra_bond_id, p_extra_qty, null, null where p_extra_bond_id is not null
     ),
@@ -58,7 +57,7 @@ language sql stable as $$
           join ref.bond b on b.bond_id = pos.bond_id
           join ref.issuer i on i.issuer_id = b.issuer_id
           cross join lateral ref.bond_metrics(pos.bond_id, p_as_of, pos.avg_cost_pct) m
-          cross join lateral risk.canonical_rating(pos.bond_id) r
+          cross join lateral risk.canonical_rating(pos.bond_id, p_as_of) r
           join ref.rating_scale sc on sc.grade = r.grade
     ),
     v2 as (

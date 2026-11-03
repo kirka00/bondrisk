@@ -1,12 +1,13 @@
 # ruff: noqa: E501  — длинные SQL-строки
+import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import text
 
 from bondrisk.api.deps import RISK, Conn, UserId
 from bondrisk.api.pagination import PageParams, page_params, paginate
-from bondrisk.api.routers._util import build_update, fetch_one, today_or
+from bondrisk.api.routers._util import fetch_one, today_or
 from bondrisk.api.schemas import LimitIn, LimitPatch, Page
 
 router = APIRouter(prefix="/limits", tags=["limits"])
@@ -27,8 +28,10 @@ def list_limits(
     portfolio_id: int | None = None,
     metric: str | None = None,
     active: bool | None = None,
+    history: bool = False,
 ) -> dict:
-    where, params = [], {}
+    """По умолчанию — последняя редакция каждого лимита; history=true — все редакции."""
+    where, params = [] if history else ["is_current"], {}
     if portfolio_id is not None:
         where.append("portfolio_id = :pid")
         params["pid"] = portfolio_id
@@ -36,7 +39,7 @@ def list_limits(
         where.append("metric = :metric")
         params["metric"] = metric
     if active is not None:
-        cond = "(valid_from <= :today and (valid_to is null or valid_to >= :today))"
+        cond = "(valid_from <= :today and (valid_to is null or valid_to > :today))"
         where.append(cond if active else f"not {cond}")
         params["today"] = today_or(None)
     return paginate(conn, BASE, where, params, SORT, page, "limit_id", "limit_id")
@@ -63,38 +66,38 @@ def get_limit(limit_id: int, conn: Conn) -> dict:
     return fetch_one(conn, BASE + " where limit_id = :id", {"id": limit_id}, "limit not found")
 
 
-@router.patch("/{limit_id}", summary="Изменить лимит", dependencies=[RISK])
+@router.patch("/{limit_id}", summary="Изменить лимит (новая редакция с даты)", dependencies=[RISK])
 def patch_limit(limit_id: int, body: LimitPatch, conn: Conn) -> dict:
-    sql, params = build_update(
-        "risk.risk_limit",
-        "limit_id",
-        limit_id,
-        body.model_dump(exclude_unset=True),
+    """Изменение условий создаёт новую редакцию с effective_from (по умолчанию — сегодня), прежняя
+    закрывается этой датой; изменение только срока правит редакцию на месте. Возвращает действующую редакцию."""
+    changes = body.model_dump(exclude_unset=True, exclude={"effective_from"})
+    if not changes:
+        raise HTTPException(status_code=422, detail="nothing to update")
+    new_id = conn.execute(
+        text("select risk.revise_limit(:id, cast(:ch as jsonb), :eff)"),
         {
-            "threshold_abs",
-            "threshold_pct",
-            "warning_pct",
-            "is_hard",
-            "side",
-            "valid_to",
-            "basis",
-            "pct_base",
-            "emission_share_pct",
-            "min_grade",
+            "id": limit_id,
+            "ch": json.dumps(changes, default=str),
+            "eff": today_or(body.effective_from),
         },
-    )
-    fetch_one(conn, sql, params, "limit not found")
-    return fetch_one(conn, BASE + " where limit_id = :id", {"id": limit_id})
+    ).scalar_one()
+    return fetch_one(conn, BASE + " where limit_id = :id", {"id": new_id})
 
 
 @router.delete(
     "/{limit_id}",
     status_code=204,
-    summary="Удалить лимит (каскадно с историей нарушений)",
+    summary="Удалить ошибочно заведённый лимит со всеми редакциями и историей нарушений",
     dependencies=[RISK],
 )
 def delete_limit(limit_id: int, conn: Conn) -> Response:
-    res = conn.execute(text("delete from risk.risk_limit where limit_id = :id"), {"id": limit_id})
+    """Исправление ошибки ввода. Чтобы лимит перестал действовать с даты, задают valid_to (PATCH)."""
+    res = conn.execute(
+        text(
+            "delete from risk.risk_limit where limit_id = (select origin_id from risk.risk_limit where limit_id = :id)"
+        ),
+        {"id": limit_id},
+    )
     if res.rowcount == 0:
         fetch_one(conn, "select 1 where false", {}, "limit not found")
     return Response(status_code=204)

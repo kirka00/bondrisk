@@ -155,6 +155,12 @@ def test_limits_preview_and_hard_limit(client, risk_client, pf, fx):
         "/api/v1/limits", json={"portfolio_id": pf, "metric": "conc_sector", "threshold_abs": 1}
     )
     assert bad.status_code == 409 and bad.json()["code"] == "23514"
+    # второй лимит DV01 на тот же период → EXCLUDE (П12) → 409 с понятным текстом
+    dup = risk_client.post(
+        "/api/v1/limits", json={"portfolio_id": pf, "metric": "dv01", "threshold_abs": 999}
+    )
+    assert dup.status_code == 409 and dup.json()["code"] == "23P01"
+    assert "уже действует лимит" in dup.json()["detail"]
     facts = {
         f["metric"]: f for f in client.get(f"/api/v1/portfolios/{pf}/limits", params=AS).json()
     }

@@ -53,7 +53,7 @@ export function LimitsTable({ rows, onEdit, factsLoading }: { rows: LimitRow[]; 
     { header: 'Лимит', id: 'limit', meta: { align: 'right' }, accessorFn: (r) => r.fact?.limit_value ?? r.threshold_abs, cell: ({ row: { original: l } }) => <span>{l.fact ? (l.fact.limit_value == null ? '—' : fmtLimitValue(l.metric, l.fact.limit_value)) : threshold(l)}{l.metric === 'new_issuer_rating' && <span className={cellSub}>не ниже {l.min_grade}</span>}{l.threshold_pct != null && l.fact && <span className={cellSub}>{l.pct_base === 'total_limit' ? `${fmt.pct(l.threshold_pct, 1)} общего лимита` : pctGross(l.threshold_pct)}</span>}{l.emission_share_pct != null && <span className={cellSub}>{fmt.pct(l.emission_share_pct, 2)} эмиссии</span>}</span> },
     { header: 'Загрузка', id: 'util', accessorFn: (r) => r.fact?.utilization_pct ?? -1, cell: ({ row: { original: l } }) => l.fact ? <span className="flex items-center gap-2.5 min-w-[180px]"><span className="flex-1"><Meter pct={l.fact.utilization_pct} status={l.fact.status} /></span><span className="tabular-nums w-11 text-right">{fmt.pct(l.fact.utilization_pct, 0)}</span></span> : <span className="text-muted text-xs">{noFact}</span> },
     { header: 'Статус', id: 'status', accessorFn: (r) => STATUS_ORDER[r.fact?.status ?? 'n/a'], cell: ({ row: { original: l } }) => l.fact ? <StatusBadge status={l.fact.status} /> : null },
-    { header: 'Действует', accessorKey: 'valid_from', cell: ({ row: { original: l } }) => <span className="text-text-2">{l.valid_to ? `${fmt.date(l.valid_from)} — ${fmt.date(l.valid_to)}` : `с ${fmt.date(l.valid_from)}`}</span> },
+    { header: 'Действует', accessorKey: 'valid_from', cell: ({ row: { original: l } }) => <span className="text-text-2">{l.valid_to ? `с ${fmt.date(l.valid_from)} до ${fmt.date(l.valid_to)}` : `с ${fmt.date(l.valid_from)}`}{l.version_no > 1 && <span className={cellSub}>редакция {l.version_no}</span>}</span> },
     ...(onEdit ? [{ header: '', id: 'actions', enableSorting: false, cell: ({ row }: { row: { original: LimitRow } }) => <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); onEdit(row.original) }} data-testid="limit-edit">Изменить</Button> } as ColumnDef<LimitRow, unknown>] : []),
   ], [onEdit, noFact])
   return (
@@ -74,7 +74,7 @@ export function LimitsTable({ rows, onEdit, factsLoading }: { rows: LimitRow[]; 
 }
 
 export function LimitDialog({ open, limit, onClose }: { open: boolean; limit: Limit | null; onClose: () => void }) {
-  const { portfolioId } = useScope()
+  const { portfolioId, asOf } = useScope()
   const save = useSaveLimit()
   const del = useDeleteLimit()
   const toast = useToast()
@@ -86,6 +86,7 @@ export function LimitDialog({ open, limit, onClose }: { open: boolean; limit: Li
   const [hard, setHard] = useState(true)
   const [from, setFrom] = useState('2024-01-01')
   const [to, setTo] = useState('')
+  const [effective, setEffective] = useState(asOf)
   const [issuer, setIssuer] = useState<ComboItem | null>(null)
   const [bond, setBond] = useState<ComboItem | null>(null)
   const [sector, setSector] = useState('')
@@ -100,7 +101,7 @@ export function LimitDialog({ open, limit, onClose }: { open: boolean; limit: Li
   useEffect(() => {
     if (!open) return
     setMetric(limit?.metric ?? 'dv01'); setSide(limit?.side ?? 'both'); setAbs(limit?.threshold_abs != null ? String(limit.threshold_abs) : ''); setPct(limit?.threshold_pct != null ? String(limit.threshold_pct) : '')
-    setWarn(String(limit?.warning_pct ?? 80)); setHard(limit?.is_hard ?? true); setFrom(limit?.valid_from ?? '2024-01-01'); setTo(limit?.valid_to ?? '')
+    setWarn(String(limit?.warning_pct ?? 80)); setHard(limit?.is_hard ?? true); setFrom(limit?.valid_from ?? '2024-01-01'); setTo(limit?.valid_to ?? ''); setEffective(asOf)
     setIssuer(limit?.scope_issuer_id ? { id: limit.scope_issuer_id, label: limit.scope ?? String(limit.scope_issuer_id) } : null)
     setBond(limit?.scope_bond_id ? { id: limit.scope_bond_id, label: limit.scope ?? String(limit.scope_bond_id) } : null)
     setSector(limit?.scope_sector ?? ''); setConfirm(false); save.reset()
@@ -118,14 +119,16 @@ export function LimitDialog({ open, limit, onClose }: { open: boolean; limit: Li
       min_grade: metric === 'new_issuer_rating' ? minGrade : null,
     }
     if (metric === 'new_issuer_rating') { body.threshold_abs = null; body.threshold_pct = null }
+    if (limit) body.effective_from = effective
     save.mutate({ id: limit?.limit_id, body }, { onSuccess: () => { toast(limit ? 'Лимит обновлён' : 'Лимит создан', 'success'); onClose() } })
   }
   const remove = () => limit && del.mutate(limit.limit_id, { onSuccess: () => { toast('Лимит удалён', 'success'); onClose() }, onError: (e) => toast(errorText(e), 'error') })
   const num = (s: string) => !s.trim() || parseNum(s) > 0
   const isConc = CONC.includes(metric)
-  const valid = (metric === 'new_issuer_rating' || abs.trim() || pct.trim() || (metric === 'conc_issue' && share.trim())) && num(abs) && num(pct) && num(share) && parseNum(warn) > 0 && parseNum(warn) <= 100
+  const valid = (!limit || !!effective) && (metric === 'new_issuer_rating' || abs.trim() || pct.trim() || (metric === 'conc_issue' && share.trim())) && num(abs) && num(pct) && num(share) && parseNum(warn) > 0 && parseNum(warn) <= 100
     && (scopeKind !== 'issuer' || issuer || scopeName.trim()) && (scopeKind !== 'bond' || bond) && (scopeKind !== 'sector' || sector)
-  // PATCH лимита меняет только пороги, тип, сторону и срок окончания: метрика, объект и начало — его идентичность
+  // PATCH лимита меняет только пороги, тип, сторону и срок окончания: метрика, объект и начало — его идентичность.
+  // Новые условия — новая редакция с даты вступления, прежняя остаётся в истории (на прошлые даты действует она)
   const locked = !!limit
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }} title={limit ? 'Изменить лимит' : 'Новый лимит'}>
@@ -150,15 +153,17 @@ export function LimitDialog({ open, limit, onClose }: { open: boolean; limit: Li
         {!locked && committee && <label className={field}><span>Самостоятельная корректировка до, %</span><input className={input({ num: true })} inputMode="decimal" value={selfAdj} onChange={(e) => setSelfAdj(e.target.value)} placeholder="сверх — совет директоров" /></label>}
         <label className={field}><span>Предупреждать с загрузки, %</span><input className={input({ num: true })} inputMode="numeric" value={warn} onChange={(e) => setWarn(e.target.value)} /></label>
         <span className="max-sm:hidden" />
-        <label className={field}><span>Действует с</span><input type="date" className={input()} value={from} disabled={locked} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className={field}><span>по (пусто — бессрочно)</span><input type="date" className={input()} value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        {locked
+          ? <label className={field}><span>Новые условия действуют с</span><input type="date" className={input()} value={effective} min={limit?.valid_from} onChange={(e) => setEffective(e.target.value)} data-testid="limit-effective" /></label>
+          : <label className={field}><span>Действует с</span><input type="date" className={input()} value={from} onChange={(e) => setFrom(e.target.value)} /></label>}
+        <label className={field}><span>до (не включая; пусто — бессрочно)</span><input type="date" className={input()} value={to} onChange={(e) => setTo(e.target.value)} /></label>
       </div>
-      {locked && <p className="text-muted text-xs mt-2">Метрику, объект и дату начала у действующего лимита не меняют — для другого правила создайте новый лимит.</p>}
+      {locked && <p className="text-muted text-xs mt-2">Изменённые условия вступают в силу с указанной даты как новая редакция (действует с {fmt.date(limit!.valid_from)}{limit!.version_no > 1 ? `, редакция ${limit!.version_no}` : ''}); на более ранние даты расчёты идут по прежней. Метрику и объект не меняют — для другого правила создайте новый лимит.</p>}
       <p className="text-muted text-xs mt-2">Жёсткий лимит блокирует сделку до исполнения, мягкий даёт предупреждение в расчёте EOD. Если заданы оба порога, применяется более строгий; у концентрации утилизация — наибольшая из ₽, % и доли эмиссии. Короткая позиция по любой бумаге, кроме ОФЗ, — нарушение лимита шорта независимо от размера.</p>
       {save.error && <div className="mt-2"><ErrorBanner error={save.error} /></div>}
       {confirm && limit && (
         <div className="mt-3 rounded-ctl bg-critical-bg px-3 py-2.5 text-[13px] flex items-center gap-3 flex-wrap" role="alert">
-          <span className="flex-1 min-w-[200px]">Удалить лимит? История нарушений по нему удалится вместе с ним.</span>
+          <span className="flex-1 min-w-[200px]">Удалить лимит со всеми редакциями и историей нарушений? Это исправление ошибки ввода; чтобы лимит перестал действовать, задайте дату окончания.</span>
           <Button size="sm" onClick={() => setConfirm(false)}>Отмена</Button>
           <Button size="sm" variant="danger" disabled={del.isPending} onClick={remove} data-testid="limit-delete-confirm">Удалить</Button>
         </div>

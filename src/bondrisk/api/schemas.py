@@ -274,6 +274,8 @@ class LimitPatch(BaseModel):
     pct_base: Literal["gross", "total_limit"] | None = None
     emission_share_pct: Decimal | None = Field(default=None, gt=0, le=100)
     min_grade: str | None = None
+    # дата вступления новой редакции; valid_to — первый день, когда лимит уже не действует
+    effective_from: date | None = None
 
 
 class WaiveIn(BaseModel):

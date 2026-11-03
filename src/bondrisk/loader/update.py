@@ -127,6 +127,12 @@ def update_portfolios(today: date, run: LoadRun) -> int:
         except Exception as e:  # noqa: BLE001 — сбой одного портфеля не останавливает остальные
             run.error(f"{code}: {str(e).splitlines()[0][:300]}")
     refresh_views()
+    # позиции и касса — производные от журналов: расхождение означает запись в обход процедур учёта
+    for r in rows("select * from ops.ledger_discrepancies()"):
+        run.error(
+            f"ledger: portfolio {r['portfolio_id']} {r['kind']} {r['object_id']}: "
+            f"stored {r['stored']}, journal {r['expected']}"
+        )
     return n
 
 

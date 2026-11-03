@@ -3,7 +3,7 @@ import { API, AS_ADMIN, gotoScoped, pickUser, portfolioId } from './helpers'
 
 test.setTimeout(120_000)
 
-test('лимиты: создать мягкий лимит dv01 в RGBI, увидеть загрузку, изменить и удалить из формы', async ({ page, request }) => {
+test('лимиты: создать мягкий лимит объёма брутто в RGBI, увидеть загрузку, изменить и удалить из формы', async ({ page, request }) => {
   const pid = await portfolioId(request, 'RGBI')
   await gotoScoped(page, '/risk', { portfolio: 'RGBI' })
   await pickUser(page, 'risk')
@@ -11,12 +11,12 @@ test('лимиты: создать мягкий лимит dv01 в RGBI, уви�
     await page.getByTestId('new-limit').click()
     const dlg = page.getByRole('dialog')
     await dlg.getByTestId('limit-metric').click()
-    await page.getByRole('option', { name: 'DV01 портфеля' }).click()
+    await page.getByRole('option', { name: 'Объём (брутто)' }).click()
     await dlg.getByTestId('limit-abs').fill('1 000 000 000,5')   // пробелы и запятая — как вводят по-русски
     await dlg.getByTestId('limit-hard').getByRole('radio', { name: 'мягкий' }).click()
     await dlg.getByTestId('limit-save').click()
     await expect(page.locator('.toast.success').last()).toContainText('создан')
-    const row = page.getByTestId('limits-table').locator('tbody tr').filter({ hasText: 'DV01 портфеля' }).filter({ hasText: '1 000 000 001' })
+    const row = page.getByTestId('limits-table').locator('tbody tr').filter({ hasText: 'Объём (брутто)' }).filter({ hasText: '1 000 000 001' })
     await expect(row).toHaveCount(1)
     // после сохранения пересчитываются все отчёты портфеля, факт приходит не сразу
     await expect(row.getByRole('meter')).toBeVisible({ timeout: 45_000 })
@@ -38,7 +38,7 @@ test('лимиты: создать мягкий лимит dv01 в RGBI, уви�
     const risk = (await (await request.get(`${API}/users`, AS_ADMIN)).json()) as { user_id: number; login: string }[]
     const rid = String(risk.find((u) => u.login === 'risk')!.user_id)
     const left = (await (await request.get(`${API}/limits?portfolio_id=${pid}&limit=200`, { headers: { 'X-User-Id': rid } })).json()) as { items: { limit_id: number; metric: string; threshold_abs: number | null }[] }
-    for (const l of left.items.filter((x) => x.metric === 'dv01' && (x.threshold_abs ?? 0) >= 1e9)) await request.delete(`${API}/limits/${l.limit_id}`, { headers: { 'X-User-Id': rid } })
+    for (const l of left.items.filter((x) => x.metric === 'mv_gross' && (x.threshold_abs ?? 0) >= 1e9)) await request.delete(`${API}/limits/${l.limit_id}`, { headers: { 'X-User-Id': rid } })
   }
 })
 

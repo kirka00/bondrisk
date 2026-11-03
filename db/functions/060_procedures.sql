@@ -2,14 +2,19 @@
 --  Составные бизнес-операции (ТЗ §4–§5): пополнение кассы, сделка, EOD, снятие нарушения.
 --  Коды ошибок: BR001 недостаточно бумаг, BR002 недостаточно денег, BR003 нарушение лимита,
 --  BR004 бумага не торгуется, BR005 нет прав, BR404 объект не найден.
+--  Процедуры учёта (пополнение, выплаты по бумагам, сделка) — SECURITY DEFINER: у роли приложения нет
+--  прямой записи в ops.position, ops.cash_account и ops.cash_movement (миграция 0014), журнал и остатки
+--  меняются только через них.
 -- =====================================================================
 
 create or replace procedure ops.deposit_cash(
     p_portfolio_id bigint, p_currency char(3), p_amount numeric, p_user_id bigint default null,
     p_note text default 'пополнение', p_value_date date default current_date)
-language plpgsql as $$
+language plpgsql security definer set search_path = pg_catalog, public, pg_temp as $$
 declare v_acc bigint;
 begin
+    -- движение и остаток считаются от одного округлённого числа, иначе остаток расходится с журналом
+    p_amount := round(p_amount, 2);
     insert into ops.cash_account (portfolio_id, currency) values (p_portfolio_id, p_currency)
         on conflict (portfolio_id, currency) do nothing;
     select cash_account_id into v_acc from ops.cash_account
@@ -26,7 +31,7 @@ end $$;
 -- виду и примечанию с кодом бумаги. Погашенная бумага выпадает из оценки сама (номинал после погашения 0),
 -- поэтому деньги от погашения — единственная проводка.
 create or replace procedure ops.book_bond_flows(p_portfolio_id bigint, p_from date, p_to date)
-language plpgsql as $$
+language plpgsql security definer set search_path = pg_catalog, public, pg_temp as $$
 declare
     f record; v_acc bigint; v_note text; v_amount numeric;
 begin
@@ -42,7 +47,7 @@ begin
           join lateral (select sum(case when t.side = 'buy' then t.qty else -t.qty end) as qty
                           from ops.trade t
                          where t.portfolio_id = p_portfolio_id and t.bond_id = s.bond_id
-                           and t.trade_date < s.pay_date and t.status <> 'cancelled') q on q.qty <> 0
+                           and t.trade_date < s.pay_date) q on q.qty <> 0
          where s.flow_type in ('coupon', 'amortization', 'redemption')
            and s.pay_date > p_from and s.pay_date <= p_to
          order by s.pay_date, s.bond_id
@@ -72,7 +77,7 @@ create or replace procedure ops.execute_trade(
     p_fee numeric default 0, p_counterparty text default null,
     p_check_limits boolean default true,
     inout p_trade_id bigint default null)
-language plpgsql as $$
+language plpgsql security definer set search_path = pg_catalog, public, pg_temp as $$
 declare
     pf   ops.portfolio%rowtype;
     b    ref.bond%rowtype;

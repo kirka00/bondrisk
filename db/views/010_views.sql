@@ -1,7 +1,7 @@
 -- =====================================================================
 --  Представления: лимиты с последним состоянием, журнал сделок; материализованное представление сводки риска по портфелям.
 -- =====================================================================
--- Лимиты с разрешённым объектом (эмитент / выпуск / отрасль) и последним состоянием из журнала EOD;
+-- Лимиты (все редакции) с разрешённым объектом (эмитент / выпуск / отрасль) и последним состоянием из журнала EOD;
 -- источник раздела «Лимиты» API (GET /limits).
 create or replace view risk.v_limit_utilization as
 select l.limit_id, l.portfolio_id, p.code as portfolio_code, l.metric, l.scope_issuer_id, l.scope_bond_id,
@@ -9,7 +9,11 @@ select l.limit_id, l.portfolio_id, p.code as portfolio_code, l.metric, l.scope_i
        l.threshold_abs, l.threshold_pct, l.warning_pct, l.is_hard, l.valid_from, l.valid_to, l.created_by, l.created_at,
        lb.as_of as last_as_of, lb.fact_value as last_fact, lb.utilization_pct as last_utilization_pct,
        lb.status as last_status,
-       l.basis, l.pct_base, l.emission_share_pct, l.scope_name, l.committee, l.self_adjust_pct, l.min_grade
+       l.basis, l.pct_base, l.emission_share_pct, l.scope_name, l.committee, l.self_adjust_pct, l.min_grade,
+       -- редакции лимита (0014): номер редакции и признак последней в цепочке
+       l.origin_id,
+       (select count(*) from risk.risk_limit v where v.origin_id = l.origin_id and v.valid_from <= l.valid_from) as version_no,
+       not exists (select 1 from risk.risk_limit n where n.origin_id = l.origin_id and n.valid_from > l.valid_from) as is_current
   from risk.risk_limit l
   join ops.portfolio p on p.portfolio_id = l.portfolio_id
   left join ref.issuer i on i.issuer_id = l.scope_issuer_id

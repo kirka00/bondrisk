@@ -49,7 +49,7 @@ language sql stable as $$
                     t.qty * (t.clean_price_pct / 100.0 * ref.face_value_at(t.bond_id, t.trade_date) + t.accrued_interest)
                       * risk.fx_on(b.currency, t.trade_date) as amount
                from ops.trade t join ref.bond b on b.bond_id = t.bond_id
-              where t.portfolio_id = p_portfolio_id and t.status <> 'cancelled'
+              where t.portfolio_id = p_portfolio_id
                 and t.trade_date <= coalesce(p_holdings_date, p_as_of)
              union all
              select x.bond_id, case when p_extra_qty > 0 then 'buy' else 'sell' end::ops.trade_side,
@@ -70,7 +70,7 @@ language sql stable as $$
                left join unit u on u.bond_id = v0.bond_id),
          l as (select * from risk.risk_limit rl
                 where rl.portfolio_id = p_portfolio_id and rl.valid_from <= p_as_of
-                  and (rl.valid_to is null or rl.valid_to >= p_as_of)),
+                  and (rl.valid_to is null or rl.valid_to > p_as_of)),   -- период [valid_from, valid_to)
          -- позиции, попадающие под лимит концентрации (объект и сторона)
          hit as (
              select l.limit_id, v.*

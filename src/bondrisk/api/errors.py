@@ -19,9 +19,18 @@ RETRYABLE_409 = {"40001", "40P01"}
 NOT_FOUND = {"BR404"}
 
 
+# ограничения, о которых пользователь должен узнать по-русски, а не текстом PostgreSQL
+CONSTRAINT_MESSAGES = {
+    "limit_no_overlap": "на этот период уже действует лимит с той же метрикой, объектом "
+    "и стороной: измените его или задайте ему дату окончания",
+}
+
+
 def _message(exc: DBAPIError) -> str:
     orig = exc.orig
     diag = getattr(orig, "diag", None)
+    if (known := CONSTRAINT_MESSAGES.get(getattr(diag, "constraint_name", None) or "")) is not None:
+        return known
     msg = getattr(diag, "message_primary", None) or str(orig)
     msg = re.sub(r"^(ERROR|ОШИБКА):\s*", "", msg).split("\n")[0]
     return msg

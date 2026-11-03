@@ -109,6 +109,18 @@ CASES = [
         "BR004",
     ),
     (
+        "отменённая сделка (отмена — встречной сделкой)",
+        "insert into ops.trade (portfolio_id, bond_id, trade_date, settlement_date, side, qty, clean_price_pct, status)"
+        " values ({pf}, {par}, '2035-01-15', '2035-01-16', 'buy', 1, 100, 'cancelled')",
+        "23514",
+    ),
+    (
+        "пересекающиеся периоды одного лимита",
+        "insert into risk.risk_limit (portfolio_id, metric, threshold_abs, valid_from, valid_to)"
+        " values ({pf}, 'var_99', 100, '2034-01-01', '2034-07-01'), ({pf}, 'var_99', 200, '2034-06-01', null)",
+        "23P01",
+    ),
+    (
         "касса в минус без овердрафта",
         "update ops.cash_account set balance = -1 where portfolio_id = {pf}",
         "23514",
@@ -308,4 +320,168 @@ def test_eod_books_coupons_once(fx):
             assert (
                 n == 1 and float(amount) == 10 * 100
             )  # купон 10 % на номинал 1000 — 100 на бумагу
+        tx.rollback()
+
+
+def test_app_role_cannot_bypass_ledger(fx):
+    """Позиция и касса — производные от журналов: роль приложения меняет их только процедурами учёта."""
+    with get_engine().connect() as c:  # роль приложения app_rw
+        tx = c.begin()
+        p = {"pf": fx.portfolio}
+        for stmt in (
+            "update ops.position set qty = qty + 1 where portfolio_id = :pf",
+            "update ops.cash_account set balance = balance + 1 where portfolio_id = :pf",
+            "insert into ops.cash_movement (cash_account_id, kind, amount)"
+            " select cash_account_id, 'deposit', 1 from ops.cash_account where portfolio_id = :pf",
+            "delete from ops.cash_movement where cash_account_id in"
+            " (select cash_account_id from ops.cash_account where portfolio_id = :pf)",
+        ):
+            assert _sqlstate(c, stmt, p) == "42501", stmt
+        tx.rollback()
+
+
+def test_ledger_reconciles_through_procedures(fx):
+    """Через процедуры учёта под ролью приложения остатки сходятся с журналами, в том числе при сумме
+    пополнения с долями копейки (до 0014 остаток расходился с движением на округление)."""
+    with get_engine().connect() as c:  # роль приложения app_rw
+        tx = c.begin()
+        p = {"pf": fx.portfolio, "b": fx.bond_par, "u": fx.user_trader}
+        c.execute(
+            text("call ops.deposit_cash(:pf, 'RUB', 1000000.005, :u, 'тест', '2035-01-10')"), p
+        )
+        c.execute(
+            text(
+                "select ops.execute_trade_fn(:pf, :b, 'buy', 10, 99.5, :u, '2035-10-25'::date, 1, 3.5)"
+            ),
+            p,
+        )
+        c.execute(text("call ops.book_bond_flows(:pf, '2035-01-01', '2035-12-31')"), p)
+        rows = c.execute(text("select * from ops.ledger_discrepancies(:pf)"), p).all()
+        assert rows == []
+        tx.rollback()
+    with get_engine(admin=True).connect() as c:
+        tx = c.begin()
+        c.execute(
+            text("update ops.cash_account set balance = balance + 0.01 where portfolio_id = :pf"), p
+        )
+        kinds = c.execute(text("select kind from ops.ledger_discrepancies(:pf)"), p).scalars().all()
+        assert "cash" in kinds  # сверка находит искусственное расхождение
+        tx.rollback()
+
+
+def test_limit_revision_keeps_history(fx):
+    """Изменение порога — новая редакция с даты вступления: на прошлые даты действует прежний порог,
+    период полуоткрытый, нарушения прежней редакции с даты вступления удаляются."""
+    with get_engine(admin=True).connect() as c:
+        tx = c.begin()
+        p = {"pf": fx.portfolio}
+        lid = c.execute(
+            text(
+                "insert into risk.risk_limit (portfolio_id, metric, threshold_abs, valid_from)"
+                " values (:pf, 'var_99', 100, '2035-01-01') returning limit_id"
+            ),
+            p,
+        ).scalar_one()
+        c.execute(
+            text(
+                "insert into risk.limit_breach (limit_id, as_of, fact_value, limit_value, utilization_pct, status)"
+                " values (:l, '2035-03-01', 120, 100, 120, 'breach'), (:l, '2035-06-01', 120, 100, 120, 'breach')"
+            ),
+            {"l": lid},
+        )
+        new_id = c.execute(
+            text("select risk.revise_limit(:l, '{\"threshold_abs\": 150}', '2035-05-01')"),
+            {"l": lid},
+        ).scalar_one()
+        assert new_id != lid
+
+        def on(d: str) -> list[tuple]:
+            return [
+                tuple(r)
+                for r in c.execute(
+                    text(
+                        "select limit_id, threshold_abs::float from risk.risk_limit where portfolio_id = :pf"
+                        " and metric = 'var_99' and valid_from <= :d and (valid_to is null or valid_to > :d)"
+                    ),
+                    {**p, "d": d},
+                )
+            ]
+
+        assert on("2035-04-30") == [(lid, 100.0)]
+        assert on("2035-05-01") == [(new_id, 150.0)]  # граница принадлежит новой редакции
+        hist = c.execute(
+            text(
+                "select limit_id, version_no, is_current from risk.v_limit_utilization"
+                " where origin_id = :l order by version_no"
+            ),
+            {"l": lid},
+        ).all()
+        assert [tuple(r) for r in hist] == [(lid, 1, False), (new_id, 2, True)]
+        breaches = (
+            c.execute(
+                text("select as_of::text from risk.limit_breach where limit_id = :l"), {"l": lid}
+            )
+            .scalars()
+            .all()
+        )
+        assert breaches == ["2035-03-01"]
+        # только срок — правка на месте, без новой редакции
+        same = c.execute(
+            text("select risk.revise_limit(:l, '{\"valid_to\": \"2036-01-01\"}', '2035-08-01')"),
+            {"l": new_id},
+        ).scalar_one()
+        assert same == new_id
+        # удаление первой редакции удаляет всю цепочку
+        c.execute(text("delete from risk.risk_limit where limit_id = :l"), {"l": lid})
+        assert (
+            c.execute(
+                text("select count(*) from risk.risk_limit where limit_id = :l"), {"l": new_id}
+            ).scalar_one()
+            == 0
+        )
+        tx.rollback()
+
+
+def test_canonical_rating_as_of(fx):
+    """Рейтинг на дату берётся из истории записей: до понижения — прежний, после отзыва рейтинга выпуска —
+    рейтинг эмитента (у фикстуры он есть); до первой загруженной записи действует она же."""
+    with get_engine(admin=True).connect() as c:
+        tx = c.begin()
+        b = {"b": fx.bond_par}
+        for grade, d, act, st in (
+            ("A", "2034-01-01", "assigned", "active"),
+            ("BBB", "2035-01-01", "assigned", "active"),
+            ("BBB", "2035-06-01", "withdrawn", "withdrawn"),
+        ):
+            if st == "withdrawn":
+                c.execute(
+                    text(
+                        "update ref.credit_rating set status = 'superseded' where bond_id = :b and status = 'active'"
+                    ),
+                    b,
+                )
+            c.execute(
+                text(
+                    "insert into ref.credit_rating (agency_id, bond_id, grade, assigned_on, action, status)"
+                    " values (3, :b, :g, :d, cast(:a as ref.rating_action), cast(:s as ref.rating_status))"
+                ),
+                {**b, "g": grade, "d": d, "a": act, "s": st},
+            )
+
+        def at(d: str) -> tuple:
+            return tuple(
+                c.execute(
+                    text("select grade, source from risk.canonical_rating(:b, :d)"), {**b, "d": d}
+                ).one()
+            )
+
+        issuer_now = at("2036-01-01")
+        assert issuer_now[1] == "issuer"
+        assert at("2033-12-31") == (
+            "A",
+            "issue",
+        )  # история агентства неполная: раньше первой записи — она же
+        assert at("2034-06-01") == ("A", "issue")
+        assert at("2035-03-01") == ("BBB", "issue")  # понижение видно только с даты присвоения
+        assert at("2035-07-01") == issuer_now  # рейтинг выпуска отозван
         tx.rollback()

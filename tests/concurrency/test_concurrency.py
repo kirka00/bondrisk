@@ -175,7 +175,12 @@ def test_serializable_conflict_and_retry(clean_position):
         while True:
             attempts += 1
             try:
-                with get_engine().connect().execution_options(isolation_level="SERIALIZABLE") as c:
+                # прямой UPDATE позиции — только у администратора: у роли приложения записи в ops.position нет
+                with (
+                    get_engine(admin=True)
+                    .connect()
+                    .execution_options(isolation_level="SERIALIZABLE") as c
+                ):
                     tx = c.begin()
                     qty = c.execute(
                         text(

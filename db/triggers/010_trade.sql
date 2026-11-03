@@ -23,8 +23,9 @@ create or replace trigger trade_before_insert before insert on ops.trade
     for each row execute function ops.trg_trade_before_insert();
 
 -- Применение сделки: позиция (средняя цена, базис) и касса (нога сделки, комиссия).
+-- SECURITY DEFINER: роль приложения вставляет сделку, но не может писать в позицию и кассу напрямую.
 create or replace function ops.trg_trade_apply() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = pg_catalog, public, pg_temp as $$
 declare
     pos   ops.position%rowtype;
     v_face numeric;
