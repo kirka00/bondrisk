@@ -68,8 +68,19 @@ deploy/      Caddy и бэкапы для прод-стека
 cp .env.prod.example .env && chmod 600 .env      # домен, почта, пароли
 touch deploy/caddy/users.caddy
 echo "admin $(docker run --rm caddy:2.10 caddy hash-password --plaintext '<пароль>')" >> deploy/caddy/users.caddy
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml --profile tools build
 docker compose -f docker-compose.prod.yml run --rm loader migrate
+docker compose -f docker-compose.prod.yml up -d
+```
+
+`loader` входит в профиль `tools`, поэтому `build` и `up --build` без `--profile tools` его не пересобирают,
+и `migrate` выполняется из старого образа. Обновление:
+
+```bash
+docker compose -f docker-compose.prod.yml stop scheduler
+docker compose -f docker-compose.prod.yml --profile tools build
+docker compose -f docker-compose.prod.yml run --rm loader migrate
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 Логин в `users.caddy` должен совпадать с пользователем в `ops.app_user` (`admin`, `trader`, `risk`, `viewer`):

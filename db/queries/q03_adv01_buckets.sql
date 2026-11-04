@@ -1,42 +1,18 @@
 -- q03. Комплексный отчёт: ADV01 по рейтинговым бакетам (методология §14–§15).
--- Этапы: 1) позиции последнего снапшота; 2) рейтинг выпуска по приоритету агентств (ROW_NUMBER);
--- 3) рейтинг эмитента аналогично; 4) канонический рейтинг: выпуск → эмитент (помечается) → ОФЗ = AAA → NR;
--- 5) бакеты шкалы: DV01 длинных/коротких, нетто × коэффициент.
--- Конструкции: многоэтапный CTE, LEFT JOIN, ROW_NUMBER() OVER (PARTITION BY), COALESCE/CASE, FILTER, SUM() OVER ().
+-- Этапы: 1) последний расчёт конца дня на дату; 2) позиции среза с каноническим рейтингом на дату оценки
+-- (выпуск → эмитент, помечается → ОФЗ = AAA → NR; его фиксирует risk.canonical_rating при расчёте);
+-- 3) бакеты шкалы: DV01 длинных/коротких, нетто × коэффициент.
+-- Конструкции: многоэтапный CTE, JOIN, COALESCE, FILTER, SUM() OVER ().
 -- Параметры: :portfolio_id, :as_of
 with snap as (
     select max(as_of) as as_of from risk.position_snapshot
-     where portfolio_id = :portfolio_id and as_of <= cast(:as_of as date)
-),
-pos as (
-    select ps.bond_id, ps.qty, ps.dv01, ps.mv_rub, b.issuer_id, i.is_sovereign
-      from risk.position_snapshot ps
-      join snap on snap.as_of = ps.as_of
-      join ref.bond b on b.bond_id = ps.bond_id
-      join ref.issuer i on i.issuer_id = b.issuer_id
-     where ps.portfolio_id = :portfolio_id
-),
-issue_r as (
-    select r.bond_id, r.grade, a.code,
-           row_number() over (partition by r.bond_id order by a.priority, r.assigned_on desc) as rn
-      from ref.credit_rating r join ref.rating_agency a on a.agency_id = r.agency_id
-     where r.status = 'active' and r.bond_id is not null
-),
-issuer_r as (
-    select r.issuer_id, r.grade, a.code,
-           row_number() over (partition by r.issuer_id order by a.priority, r.assigned_on desc) as rn
-      from ref.credit_rating r join ref.rating_agency a on a.agency_id = r.agency_id
-     where r.status = 'active' and r.issuer_id is not null
+     where portfolio_id = :portfolio_id and as_of <= cast(:as_of as date) and not is_proforma
 ),
 canon as (
-    select p.*,
-           coalesce(ir.grade, sr.grade, case when p.is_sovereign then 'AAA' end, 'NR') as grade,
-           case when ir.grade is not null then 'issue'
-                when sr.grade is not null then 'issuer'
-                when p.is_sovereign then 'sovereign' else 'none' end as rating_source
-      from pos p
-      left join issue_r  ir on ir.bond_id = p.bond_id and ir.rn = 1
-      left join issuer_r sr on sr.issuer_id = p.issuer_id and sr.rn = 1
+    select ps.qty, ps.dv01, ps.mv_rub, coalesce(ps.rating_grade, 'NR') as grade, ps.rating_source
+      from risk.position_snapshot ps
+      join snap on snap.as_of = ps.as_of
+     where ps.portfolio_id = :portfolio_id and not ps.is_proforma
 ),
 buckets as (
     select s.adv01_bucket as bucket, s.adv01_coef as coef, min(s.score) as order_key,

@@ -18,7 +18,7 @@ select i.issuer_id, i.name as issuer_name, i.sector,
             and l.metric = 'conc_issuer'
             and l.scope_issuer_id = i.issuer_id
             and l.valid_from <= cast(:as_of as date)
-            and (l.valid_to is null or l.valid_to >= cast(:as_of as date)))
+            and (l.valid_to is null or l.valid_to > cast(:as_of as date)))
  group by i.issuer_id, i.name, i.sector
 having sum(abs(v.mv_rub)) > 0
  order by mv_rub desc;

@@ -198,6 +198,12 @@ def test_limits_preview_and_hard_limit(client, risk_client, pf, fx):
         ]
         == 60.0
     )
+    # новая редакция с даты, когда лимит уже не действует → 22023 → 422
+    risk_client.patch(f"/api/v1/limits/{lim_dv01}", json={"valid_to": "2036-01-01"})
+    late = risk_client.patch(
+        f"/api/v1/limits/{lim_dv01}", json={"warning_pct": 70, "effective_from": "2036-06-01"}
+    )
+    assert late.status_code == 422 and late.json()["code"] == "22023"
 
 
 def test_eod_breach_waive(client, risk_client, pf, fx):

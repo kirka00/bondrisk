@@ -1,4 +1,5 @@
-"""Конкурентный доступ (ТЗ §5): аномалия без защиты, защита в процедуре, атомарность, конфликт сериализации.
+"""Конкурентный доступ (ТЗ §5): аномалия без защиты, защита в процедуре, очередь с расчётом конца дня,
+атомарность, конфликт сериализации.
 
 Каждый сценарий выполняется двумя независимыми подключениями, стартующими одновременно (barrier).
 """
@@ -6,6 +7,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -124,6 +126,49 @@ def test_limit_double_pass_prevented(clean_position):
     results = _run_parallel(worker)
     assert sorted(r[0] for r in results) == ["err", "ok"]
     assert [r[1] for r in results if r[0] == "err"] == ["BR003"]
+    assert _position(fx) == 1500
+
+
+def test_eod_waits_for_trades_queue(clean_position):
+    """Расчёт конца дня встаёт в ту же очередь портфеля: пока run_eod не зафиксирован, сделка ждёт его
+    advisory-lock, поэтому срез не видит «полусделку», а сделка проходит после расчёта."""
+    fx = clean_position
+    eod_locked, trade_started = threading.Event(), threading.Event()
+
+    def eod():
+        with get_engine().connect() as c:
+            tx = c.begin()
+            c.execute(text("call risk.run_eod(:p, '2035-10-25'::date)"), {"p": fx.portfolio})
+            eod_locked.set()
+            trade_started.wait()
+            time.sleep(0.5)  # сделка в это время ждёт блокировку
+            tx.commit()
+            return time.monotonic()
+
+    def trade():
+        eod_locked.wait()
+        trade_started.set()
+        with get_engine().begin() as c:
+            c.execute(
+                text(
+                    "select ops.execute_trade_fn(:p, :b, 'buy', 500, 100, :u, '2035-10-25'::date)"
+                ),
+                {"p": fx.portfolio, "b": fx.bond_par, "u": fx.user_trader},
+            )
+        return time.monotonic()
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        eod_done, trade_done = ex.submit(eod), ex.submit(trade)
+        assert trade_done.result() >= eod_done.result()  # сделка завершилась только после расчёта
+    with get_engine(admin=True).connect() as c:
+        snap_qty = c.execute(
+            text(
+                "select qty from risk.position_snapshot where portfolio_id = :p and bond_id = :b"
+                " and as_of = '2035-10-25' and not is_proforma"
+            ),
+            {"p": fx.portfolio, "b": fx.bond_par},
+        ).scalar_one()
+    assert snap_qty == 1000  # срез — состояние до сделки
     assert _position(fx) == 1500
 
 
