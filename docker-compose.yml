@@ -6,7 +6,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: bondrisk
-    command: ["postgres", "-c", "shared_preload_libraries=timescaledb", "-c", "timescaledb.telemetry_level=off"]
+    # jit=off как в проде: JIT компилирует запросы к функциям риска дольше, чем они выполняются
+    # (сделка в RGBI с проверкой лимитов — 8,6 с с JIT и 0,1 с без него)
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb", "-c", "timescaledb.telemetry_level=off",
+              "-c", "jit=off"]
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
