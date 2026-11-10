@@ -15,4 +15,4 @@ data/
 deploy/caddy/users.caddy
 backups/
 logs/
-reports/
+/reports/
